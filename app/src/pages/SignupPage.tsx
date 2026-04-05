@@ -5,10 +5,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Package, Eye, EyeOff, Loader2, ArrowLeft, CheckCircle } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function SignupPage() {
   const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
+  const { register, isLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -21,12 +22,16 @@ export default function SignupPage() {
     agreeTerms: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [registerError, setRegisterError] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+    if (registerError) {
+      setRegisterError('');
     }
   };
 
@@ -68,18 +73,23 @@ export default function SignupPage() {
     
     if (!validateForm()) return;
     
-    setIsLoading(true);
+    setRegisterError('');
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    const result = await register(
+      formData.username,
+      formData.email,
+      formData.password,
+      formData.username
+    );
     
-    setIsLoading(false);
-    setIsSuccess(true);
-    
-    // Redirect after success
-    setTimeout(() => {
-      navigate('/login');
-    }, 2000);
+    if (result.success) {
+      setIsSuccess(true);
+      setTimeout(() => {
+        navigate('/');
+      }, 2000);
+    } else {
+      setRegisterError(result.error || 'Registration failed. Please try again.');
+    }
   };
 
   if (isSuccess) {
@@ -93,7 +103,7 @@ export default function SignupPage() {
             Account Created!
           </h1>
           <p className="text-gray-600 mb-6">
-            Welcome to CashSupportShipment! Redirecting you to login...
+            Welcome to CashSupportShipment! Redirecting you to the homepage...
           </p>
         </div>
       </div>
@@ -138,6 +148,13 @@ export default function SignupPage() {
               </p>
             </div>
 
+            {/* Register Error */}
+            {registerError && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
+                {registerError}
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Username */}
               <div className="space-y-2">
@@ -151,6 +168,7 @@ export default function SignupPage() {
                   placeholder="johndoe"
                   value={formData.username}
                   onChange={handleChange}
+                  disabled={isLoading}
                   className={`h-12 border-2 ${errors.username ? 'border-red-300' : 'border-gray-200'} focus:border-purple-500 rounded-xl`}
                 />
                 {errors.username && (
@@ -171,6 +189,7 @@ export default function SignupPage() {
                   placeholder="you@company.com"
                   value={formData.email}
                   onChange={handleChange}
+                  disabled={isLoading}
                   className={`h-12 border-2 ${errors.email ? 'border-red-300' : 'border-gray-200'} focus:border-purple-500 rounded-xl`}
                 />
                 {errors.email && (
@@ -191,12 +210,14 @@ export default function SignupPage() {
                     placeholder="Create a strong password"
                     value={formData.password}
                     onChange={handleChange}
+                    disabled={isLoading}
                     className={`h-12 border-2 ${errors.password ? 'border-red-300' : 'border-gray-200'} focus:border-purple-500 rounded-xl pr-12`}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
@@ -219,12 +240,14 @@ export default function SignupPage() {
                     placeholder="Confirm your password"
                     value={formData.confirmPassword}
                     onChange={handleChange}
+                    disabled={isLoading}
                     className={`h-12 border-2 ${errors.confirmPassword ? 'border-red-300' : 'border-gray-200'} focus:border-purple-500 rounded-xl pr-12`}
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    tabIndex={-1}
                   >
                     {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
@@ -249,6 +272,7 @@ export default function SignupPage() {
                   placeholder="@username"
                   value={formData.referrer}
                   onChange={handleChange}
+                  disabled={isLoading}
                   className="h-12 border-2 border-gray-200 focus:border-purple-500 rounded-xl"
                 />
               </div>
@@ -262,6 +286,7 @@ export default function SignupPage() {
                     onCheckedChange={(checked) => 
                       setFormData(prev => ({ ...prev, agreeTerms: checked as boolean }))
                     }
+                    disabled={isLoading}
                     className={errors.agreeTerms ? 'border-red-300' : ''}
                   />
                   <Label htmlFor="agreeTerms" className="text-sm text-gray-600 cursor-pointer leading-relaxed">

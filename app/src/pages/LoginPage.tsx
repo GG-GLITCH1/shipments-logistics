@@ -5,10 +5,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Package, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
+  const { login, isLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
@@ -16,13 +17,17 @@ export default function LoginPage() {
     rememberMe: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loginError, setLoginError] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    // Clear error when user types
+    // Clear errors when user types
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+    if (loginError) {
+      setLoginError('');
     }
   };
 
@@ -48,19 +53,21 @@ export default function LoginPage() {
     
     if (!validateForm()) return;
     
-    setIsLoading(true);
+    setLoginError('');
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    const result = await login(formData.email, formData.password);
     
-    // For demo, check if it's admin
-    if (formData.email === 'admin@cashsupportshipment.com') {
-      navigate('/admin');
+    if (result.success) {
+      // Redirect based on role
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (user.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/');
+      }
     } else {
-      navigate('/');
+      setLoginError(result.error || 'Login failed. Please try again.');
     }
-    
-    setIsLoading(false);
   };
 
   return (
@@ -104,6 +111,13 @@ export default function LoginPage() {
               </p>
             </div>
 
+            {/* Login Error */}
+            {loginError && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
+                {loginError}
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Email */}
               <div className="space-y-2">
@@ -117,6 +131,7 @@ export default function LoginPage() {
                   placeholder="you@company.com"
                   value={formData.email}
                   onChange={handleChange}
+                  disabled={isLoading}
                   className={`h-12 border-2 ${errors.email ? 'border-red-300' : 'border-gray-200'} focus:border-purple-500 rounded-xl`}
                 />
                 {errors.email && (
@@ -145,12 +160,14 @@ export default function LoginPage() {
                     placeholder="Enter your password"
                     value={formData.password}
                     onChange={handleChange}
+                    disabled={isLoading}
                     className={`h-12 border-2 ${errors.password ? 'border-red-300' : 'border-gray-200'} focus:border-purple-500 rounded-xl pr-12`}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    tabIndex={-1}
                   >
                     {showPassword ? (
                       <EyeOff className="w-5 h-5" />
@@ -172,6 +189,7 @@ export default function LoginPage() {
                   onCheckedChange={(checked) => 
                     setFormData(prev => ({ ...prev, rememberMe: checked as boolean }))
                   }
+                  disabled={isLoading}
                 />
                 <Label htmlFor="rememberMe" className="text-sm text-gray-600 cursor-pointer">
                   Remember me
@@ -195,22 +213,6 @@ export default function LoginPage() {
                 )}
               </Button>
             </form>
-
-            {/* Divider */}
-            <div className="relative my-8">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-white text-gray-500">Demo Credentials</span>
-              </div>
-            </div>
-
-            {/* Demo Info */}
-            <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
-              <p><strong>Admin:</strong> admin@cashsupportshipment.com / admin123</p>
-              <p className="mt-1"><strong>User:</strong> Any email / password</p>
-            </div>
 
             {/* Sign Up Link */}
             <p className="mt-6 text-center text-gray-600">

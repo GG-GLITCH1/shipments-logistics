@@ -7,6 +7,7 @@ import FAQ from '@/sections/FAQ';
 import Contact from '@/sections/Contact';
 import CTA from '@/sections/CTA';
 import Footer from '@/sections/Footer';
+import ChatWidget from '@/components/ChatWidget';
 
 export default function HomePage() {
   return (
@@ -22,6 +23,7 @@ export default function HomePage() {
         <CTA />
       </main>
       <Footer />
+      <ChatWidget />
     </div>
   );
 }
