@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -21,86 +21,19 @@ import {
   Edit, 
   Trash2, 
   Eye,
-  Filter,
   Download,
   Package,
   MapPin,
   CheckCircle,
   Truck,
   Clock,
-  XCircle
+  XCircle,
+  RefreshCw,
+  ArrowRight
 } from 'lucide-react';
 import { getStatusColor, getStatusLabel, formatDate } from '@/lib/utils';
 
-// Mock shipments data
-const mockShipments = [
-  { 
-    id: '1', 
-    trackingNumber: 'CSS123456789', 
-    sender: 'ABC Electronics', 
-    receiver: 'John Doe',
-    origin: 'New York, NY',
-    destination: 'Los Angeles, CA',
-    status: 'in_transit',
-    createdAt: '2024-12-18',
-    estimatedDelivery: '2024-12-20',
-  },
-  { 
-    id: '2', 
-    trackingNumber: 'CSS987654321', 
-    sender: 'Tech Corp', 
-    receiver: 'Sarah Smith',
-    origin: 'San Francisco, CA',
-    destination: 'Seattle, WA',
-    status: 'delivered',
-    createdAt: '2024-12-15',
-    estimatedDelivery: '2024-12-17',
-  },
-  { 
-    id: '3', 
-    trackingNumber: 'CSS456789123', 
-    sender: 'Global Trade', 
-    receiver: 'Mike Johnson',
-    origin: 'Miami, FL',
-    destination: 'Chicago, IL',
-    status: 'pending',
-    createdAt: '2024-12-19',
-    estimatedDelivery: '2024-12-22',
-  },
-  { 
-    id: '4', 
-    trackingNumber: 'CSS789123456', 
-    sender: 'Fast Delivery', 
-    receiver: 'Emily Brown',
-    origin: 'Boston, MA',
-    destination: 'Denver, CO',
-    status: 'out_for_delivery',
-    createdAt: '2024-12-17',
-    estimatedDelivery: '2024-12-19',
-  },
-  { 
-    id: '5', 
-    trackingNumber: 'CSS321654987', 
-    sender: 'Express Ship', 
-    receiver: 'David Wilson',
-    origin: 'Dallas, TX',
-    destination: 'Phoenix, AZ',
-    status: 'picked_up',
-    createdAt: '2024-12-19',
-    estimatedDelivery: '2024-12-21',
-  },
-  { 
-    id: '6', 
-    trackingNumber: 'CSS654987321', 
-    sender: 'Prime Logistics', 
-    receiver: 'Lisa Anderson',
-    origin: 'Atlanta, GA',
-    destination: 'Portland, OR',
-    status: 'cancelled',
-    createdAt: '2024-12-16',
-    estimatedDelivery: '2024-12-18',
-  },
-];
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const statusIcons: Record<string, React.ElementType> = {
   pending: Clock,
@@ -111,32 +44,132 @@ const statusIcons: Record<string, React.ElementType> = {
   cancelled: XCircle,
 };
 
+const statusFlow = ['pending', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered'];
+
+interface Shipment {
+  id: string;
+  trackingNumber: string;
+  sender_name: string;
+  receiver_name: string;
+  origin: string;
+  destination: string;
+  status: string;
+  created_at: string;
+  estimated_delivery: string;
+  weight?: number;
+}
+
 export default function ShipmentManagement() {
-  const [shipments, setShipments] = useState(mockShipments);
+  const [shipments, setShipments] = useState<Shipment[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
+  const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [newStatus, setNewStatus] = useState('');
+  const [location, setLocation] = useState('');
+  const [description, setDescription] = useState('');
+
+  // Fetch shipments on mount
+  useEffect(() => {
+    fetchShipments();
+  }, []);
+
+  const fetchShipments = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/shipments`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setShipments(data.shipments || []);
+      }
+    } catch (error) {
+      console.error('Error fetching shipments:', error);
+    }
+  };
 
   const filteredShipments = shipments.filter(shipment => {
     const matchesSearch = 
-      shipment.trackingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      shipment.sender.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      shipment.receiver.toLowerCase().includes(searchQuery.toLowerCase());
+      shipment.trackingNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      shipment.sender_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      shipment.receiver_name?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = selectedStatus === 'all' || shipment.status === selectedStatus;
     return matchesSearch && matchesStatus;
   });
 
-  const handleDeleteShipment = (shipmentId: string) => {
-    setShipments(shipments.filter(shipment => shipment.id !== shipmentId));
+  const handleViewShipment = (shipment: Shipment) => {
+    setSelectedShipment(shipment);
+    setIsViewDialogOpen(true);
   };
 
-  const handleUpdateStatus = (shipmentId: string, newStatus: string) => {
-    setShipments(shipments.map(shipment => {
-      if (shipment.id === shipmentId) {
-        return { ...shipment, status: newStatus };
+  const handleUpdateStatus = (shipment: Shipment) => {
+    setSelectedShipment(shipment);
+    // Set next status in flow as default
+    const currentIndex = statusFlow.indexOf(shipment.status);
+    const nextStatus = statusFlow[currentIndex + 1] || shipment.status;
+    setNewStatus(nextStatus);
+    setLocation('');
+    setDescription('');
+    setIsUpdateDialogOpen(true);
+  };
+
+  const submitStatusUpdate = async () => {
+    if (!selectedShipment || !newStatus) return;
+
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/shipments/${selectedShipment.id}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          location: location || 'Unknown',
+          description: description || `Status updated to ${getStatusLabel(newStatus)}`,
+        }),
+      });
+
+      if (response.ok) {
+        await fetchShipments();
+        setIsUpdateDialogOpen(false);
+        setSelectedShipment(null);
       }
-      return shipment;
-    }));
+    } catch (error) {
+      console.error('Error updating status:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteShipment = async (shipmentId: string) => {
+    if (!confirm('Are you sure you want to delete this shipment?')) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`${API_URL}/shipments/${shipmentId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      await fetchShipments();
+    } catch (error) {
+      console.error('Error deleting shipment:', error);
+    }
+  };
+
+  const getNextStatus = (currentStatus: string) => {
+    const currentIndex = statusFlow.indexOf(currentStatus);
+    return statusFlow[currentIndex + 1];
   };
 
   return (
@@ -199,10 +232,10 @@ export default function ShipmentManagement() {
         {[
           { label: 'Total', count: shipments.length, color: 'bg-gray-500' },
           { label: 'Pending', count: shipments.filter(s => s.status === 'pending').length, color: 'bg-yellow-500' },
+          { label: 'Picked Up', count: shipments.filter(s => s.status === 'picked_up').length, color: 'bg-blue-500' },
           { label: 'In Transit', count: shipments.filter(s => s.status === 'in_transit').length, color: 'bg-purple-500' },
-          { label: 'Out for Delivery', count: shipments.filter(s => s.status === 'out_for_delivery').length, color: 'bg-blue-500' },
+          { label: 'Out for Delivery', count: shipments.filter(s => s.status === 'out_for_delivery').length, color: 'bg-orange-500' },
           { label: 'Delivered', count: shipments.filter(s => s.status === 'delivered').length, color: 'bg-green-500' },
-          { label: 'Cancelled', count: shipments.filter(s => s.status === 'cancelled').length, color: 'bg-red-500' },
         ].map((stat) => (
           <div key={stat.label} className="bg-white rounded-xl p-4 shadow-sm">
             <div className="flex items-center gap-2">
@@ -239,9 +272,9 @@ export default function ShipmentManagement() {
             <option value="delivered">Delivered</option>
             <option value="cancelled">Cancelled</option>
           </select>
-          <Button variant="outline" className="gap-2">
-            <Filter className="w-4 h-4" />
-            Filter
+          <Button variant="outline" className="gap-2" onClick={fetchShipments}>
+            <RefreshCw className="w-4 h-4" />
+            Refresh
           </Button>
           <Button variant="outline" className="gap-2">
             <Download className="w-4 h-4" />
@@ -266,7 +299,9 @@ export default function ShipmentManagement() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredShipments.map((shipment) => {
-                const StatusIcon = statusIcons[shipment.status];
+                const StatusIcon = statusIcons[shipment.status] || Package;
+                const nextStatus = getNextStatus(shipment.status);
+                
                 return (
                   <tr key={shipment.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
@@ -277,25 +312,25 @@ export default function ShipmentManagement() {
                     </td>
                     <td className="px-6 py-4">
                       <div>
-                        <p className="font-medium text-navy-950">{shipment.sender}</p>
-                        <p className="text-sm text-gray-500">{shipment.receiver}</p>
+                        <p className="font-medium text-navy-950">{shipment.sender_name}</p>
+                        <p className="text-sm text-gray-500">{shipment.receiver_name}</p>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2 text-sm">
                         <span>{shipment.origin}</span>
-                        <span className="text-gray-400">→</span>
+                        <ArrowRight className="w-4 h-4 text-gray-400" />
                         <span>{shipment.destination}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${getStatusColor(shipment.status).replace('bg-', 'bg-opacity-10 bg-')} text-${getStatusColor(shipment.status).replace('bg-', '')}`}>
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${getStatusColor(shipment.status)} bg-opacity-10`}>
                         <StatusIcon className="w-3.5 h-3.5" />
                         {getStatusLabel(shipment.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {formatDate(shipment.estimatedDelivery)}
+                      {shipment.estimated_delivery ? formatDate(shipment.estimated_delivery) : 'N/A'}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <DropdownMenu>
@@ -305,20 +340,19 @@ export default function ShipmentManagement() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem className="gap-2">
+                          <DropdownMenuItem className="gap-2" onClick={() => handleViewShipment(shipment)}>
                             <Eye className="w-4 h-4" />
                             View Details
                           </DropdownMenuItem>
+                          {nextStatus && (
+                            <DropdownMenuItem className="gap-2" onClick={() => handleUpdateStatus(shipment)}>
+                              <RefreshCw className="w-4 h-4" />
+                              Update to {getStatusLabel(nextStatus)}
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem className="gap-2">
                             <Edit className="w-4 h-4" />
                             Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            className="gap-2"
-                            onClick={() => handleUpdateStatus(shipment.id, 'delivered')}
-                          >
-                            <CheckCircle className="w-4 h-4" />
-                            Mark as Delivered
                           </DropdownMenuItem>
                           <DropdownMenuItem 
                             className="gap-2 text-red-600"
@@ -352,6 +386,118 @@ export default function ShipmentManagement() {
           </div>
         </div>
       </div>
+
+      {/* View Shipment Dialog */}
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Shipment Details</DialogTitle>
+          </DialogHeader>
+          {selectedShipment && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-gray-500">Tracking Number</label>
+                  <p className="font-medium">{selectedShipment.trackingNumber}</p>
+                </div>
+                <div>
+                  <label className="text-sm text-gray-500">Status</label>
+                  <p className="font-medium">{getStatusLabel(selectedShipment.status)}</p>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-gray-500">Sender</label>
+                <p className="font-medium">{selectedShipment.sender_name}</p>
+              </div>
+              <div>
+                <label className="text-sm text-gray-500">Receiver</label>
+                <p className="font-medium">{selectedShipment.receiver_name}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-gray-500">Origin</label>
+                  <p className="font-medium">{selectedShipment.origin}</p>
+                </div>
+                <div>
+                  <label className="text-sm text-gray-500">Destination</label>
+                  <p className="font-medium">{selectedShipment.destination}</p>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-gray-500">Estimated Delivery</label>
+                <p className="font-medium">
+                  {selectedShipment.estimated_delivery ? formatDate(selectedShipment.estimated_delivery) : 'N/A'}
+                </p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Update Status Dialog */}
+      <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Update Shipment Status</DialogTitle>
+          </DialogHeader>
+          {selectedShipment && (
+            <div className="space-y-4 py-4">
+              <div>
+                <label className="text-sm font-medium">Current Status</label>
+                <p className="text-gray-600">{getStatusLabel(selectedShipment.status)}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium">New Status</label>
+                <select
+                  value={newStatus}
+                  onChange={(e) => setNewStatus(e.target.value)}
+                  className="w-full h-10 px-3 rounded-md border border-gray-200 mt-1"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="picked_up">Picked Up</option>
+                  <option value="in_transit">In Transit</option>
+                  <option value="out_for_delivery">Out for Delivery</option>
+                  <option value="delivered">Delivered</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Location</label>
+                <Input
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g., New York Distribution Center"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Description</label>
+                <Input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g., Package scanned at facility"
+                  className="mt-1"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  className="flex-1 bg-gradient-brand text-white"
+                  onClick={submitStatusUpdate}
+                  disabled={isLoading || !newStatus}
+                >
+                  {isLoading ? 'Updating...' : 'Update Status'}
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => setIsUpdateDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
