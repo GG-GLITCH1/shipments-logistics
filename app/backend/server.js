@@ -107,6 +107,29 @@ function initializeDatabase() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Chat sessions table
+    db.run(`CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      user_name TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      assigned_agent TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Chat messages table
+    db.run(`CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      chat_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      sender TEXT NOT NULL,
+      sender_name TEXT,
+      read BOOLEAN DEFAULT 0,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (chat_id) REFERENCES chat_sessions(id)
+    )`);
+
     // Create default admin user
     const adminId = uuidv4();
     const adminPassword = bcrypt.hashSync('admin123', 10);
@@ -694,6 +717,174 @@ app.get('/api/stats', authenticateToken, requireAdmin, (req, res) => {
       });
     });
   });
+});
+
+// ==================== CHAT ROUTES ====================
+
+// Start a new chat session (public)
+app.post('/api/chat/start', [
+  body('userName').notEmpty().withMessage('Name required'),
+  body('userEmail').isEmail().withMessage('Valid email required'),
+], (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const { userName, userEmail } = req.body;
+  const chatId = uuidv4();
+
+  db.run(
+    `INSERT INTO chat_sessions (id, user_name, user_email) VALUES (?, ?, ?)`,
+    [chatId, userName, userEmail],
+    function(err) {
+      if (err) {
+        console.error('Error creating chat session:', err);
+        return res.status(500).json({ error: 'Error starting chat' });
+      }
+      res.status(201).json({ chatId, message: 'Chat session created' });
+    }
+  );
+});
+
+// Send message in chat (public)
+app.post('/api/chat/:chatId/message', [
+  body('text').notEmpty().withMessage('Message text required'),
+  body('sender').isIn(['user', 'support']).withMessage('Invalid sender'),
+], (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const { chatId } = req.params;
+  const { text, sender, senderName } = req.body;
+
+  // Verify chat exists
+  db.get('SELECT * FROM chat_sessions WHERE id = ?', [chatId], (err, chat) => {
+    if (err || !chat) {
+      return res.status(404).json({ error: 'Chat session not found' });
+    }
+
+    const messageId = uuidv4();
+    db.run(
+      `INSERT INTO chat_messages (id, chat_id, text, sender, sender_name) VALUES (?, ?, ?, ?, ?)`,
+      [messageId, chatId, text, sender, senderName || null],
+      function(err) {
+        if (err) {
+          console.error('Error saving message:', err);
+          return res.status(500).json({ error: 'Error sending message' });
+        }
+
+        // Update chat session timestamp
+        db.run('UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [chatId]);
+
+        res.status(201).json({ messageId, message: 'Message sent' });
+      }
+    );
+  });
+});
+
+// Get messages for a chat (public)
+app.get('/api/chat/:chatId/messages', (req, res) => {
+  const { chatId } = req.params;
+
+  db.all(
+    `SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY timestamp ASC`,
+    [chatId],
+    (err, messages) => {
+      if (err) {
+        return res.status(500).json({ error: 'Error fetching messages' });
+      }
+      res.json({ messages });
+    }
+  );
+});
+
+// Get all chats (admin only)
+app.get('/api/chat/admin/chats', authenticateToken, requireAdmin, (req, res) => {
+  db.all(
+    `SELECT 
+      cs.*,
+      (SELECT text FROM chat_messages WHERE chat_id = cs.id ORDER BY timestamp DESC LIMIT 1) as last_message,
+      (SELECT timestamp FROM chat_messages WHERE chat_id = cs.id ORDER BY timestamp DESC LIMIT 1) as last_message_time,
+      (SELECT COUNT(*) FROM chat_messages WHERE chat_id = cs.id AND sender = 'user' AND read = 0) as unread_count
+    FROM chat_sessions cs
+    ORDER BY cs.updated_at DESC`,
+    [],
+    (err, chats) => {
+      if (err) {
+        console.error('Error fetching chats:', err);
+        return res.status(500).json({ error: 'Error fetching chats' });
+      }
+      res.json({ chats });
+    }
+  );
+});
+
+// Get full chat with messages (admin only)
+app.get('/api/chat/admin/:chatId', authenticateToken, requireAdmin, (req, res) => {
+  const { chatId } = req.params;
+
+  db.get('SELECT * FROM chat_sessions WHERE id = ?', [chatId], (err, chat) => {
+    if (err || !chat) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
+
+    db.all(
+      'SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY timestamp ASC',
+      [chatId],
+      (err, messages) => {
+        if (err) {
+          return res.status(500).json({ error: 'Error fetching messages' });
+        }
+
+        // Mark messages as read
+        db.run('UPDATE chat_messages SET read = 1 WHERE chat_id = ? AND sender = ?', [chatId, 'user']);
+
+        res.json({ chat: { ...chat, messages } });
+      }
+    );
+  });
+});
+
+// Update chat status (admin only)
+app.put('/api/chat/:chatId/status', authenticateToken, requireAdmin, (req, res) => {
+  const { chatId } = req.params;
+  const { status } = req.body;
+
+  const validStatuses = ['active', 'closed', 'pending'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
+  db.run(
+    'UPDATE chat_sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [status, chatId],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: 'Error updating chat status' });
+      }
+      res.json({ message: 'Chat status updated' });
+    }
+  );
+});
+
+// Assign agent to chat (admin only)
+app.put('/api/chat/:chatId/assign', authenticateToken, requireAdmin, (req, res) => {
+  const { chatId } = req.params;
+  const { agentId } = req.body;
+
+  db.run(
+    'UPDATE chat_sessions SET assigned_agent = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [agentId, chatId],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: 'Error assigning agent' });
+      }
+      res.json({ message: 'Agent assigned' });
+    }
+  );
 });
 
 // ==================== STATIC FILES ====================
